@@ -975,7 +975,8 @@ export default function App() {
       callback: async (resp: { access_token?: string; error?: string }) => {
         if (!resp.access_token) {
           console.error('[GIS error]', resp.error, resp);
-          if (resp.error !== 'access_denied' && resp.error !== 'popup_closed_by_user') {
+          const silent = ['access_denied', 'popup_closed_by_user', 'popup_failed_to_open'];
+          if (!silent.includes(resp.error || '')) {
             setErrorMsg(`OAuth 오류: ${resp.error || 'unknown'}`);
             setPhase('error');
           }
