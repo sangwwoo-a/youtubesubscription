@@ -97,15 +97,15 @@ const tiers = [
   },
   {
     range: [51, 70], code: "novice-hoarder", accent: "#FF6B47", accentSoft: "#F8A48B",
-    tag: "방치형", title: "디지털 호더 — 견습", body: "구독 알림은 끄셨죠? 이미 보지 않는 채널이 절반을 넘습니다.",
+    tag: "방치형", title: "구독 중독 — 입문", body: "구독 알림은 끄셨죠? 이미 보지 않는 채널이 절반을 넘습니다.",
     badge: "🪦", shareTone: "self-deprecate",
-    shareText: (s: number) => `내 분석 점수 ${s}/100 — 디지털 호더 견습 🪦\n다같이 부끄러우면 그건 평균이지`,
+    shareText: (s: number) => `내 분석 점수 ${s}/100 — 구독 중독 입문 🪦\n다같이 부끄러우면 그건 그냥 평균이지`,
   },
   {
     range: [71, 89], code: "expert-hoarder", accent: "#E63946", accentSoft: "#F08585",
-    tag: "호더형", title: "디지털 호더 — 전문가", body: "구독 채널 대부분이 무덤 상태예요. 정리할 때가 한참 지났습니다.",
+    tag: "중독형", title: "구독 중독 — 고수", body: "구독 채널 대부분이 무덤 상태예요. 정리할 때가 한참 지났습니다.",
     badge: "💀", shareTone: "competitive",
-    shareText: (s: number) => `내 분석 점수 ${s}/100 받음 ㅋㅋㅋ 💀\n호더 전문가 등급. 이제 진짜 정리해야지`,
+    shareText: (s: number) => `내 분석 점수 ${s}/100 받음 ㅋㅋ 💀\n구독 중독 고수 등급. 이제 진짜 정리해야지`,
   },
   {
     range: [90, 100], code: "legend", accent: "#E6B450", accentSoft: "#F2D27A",
