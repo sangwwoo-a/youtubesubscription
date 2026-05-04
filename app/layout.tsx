@@ -29,6 +29,7 @@ export default function RootLayout({
           rel="stylesheet"
           href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable.min.css"
         />
+        <script src="https://accounts.google.com/gsi/client" async defer />
       </head>
       <body>{children}</body>
     </html>

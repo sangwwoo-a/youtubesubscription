@@ -15,9 +15,41 @@ const CATEGORY_COLORS: Record<string, string> = {
   "AI/테크":    "#E6B450",
   "엔터/예능":  "#B47D8E",
   "영화/리뷰":  "#9B8A6B",
+  "기타":       "#666",
 };
 
-const sampleData = {
+// ── Types ──────────────────────────────────────────────────────────────────
+type AnalyzedData = {
+  totalSubs: number;
+  yearsOnYoutube: number;
+  deadChannelPercent: number;
+  lazinessScore: number;
+  oldestSubscription: { channel: string; subscribedYear: number; diedYear: number };
+  totalWatchTime: { years: number; months: number };
+  categoryDistribution: { name: string; count: number; pct: number }[];
+  yearlyInterests: {
+    year: number; age: string; categories: string[]; comment: string;
+    channels: { name: string; cat: string; status: string }[];
+  }[];
+  forgottenInterests: string[];
+};
+
+type SubItem = {
+  snippet: {
+    title: string;
+    publishedAt: string;
+    resourceId: { channelId: string };
+  };
+};
+
+type ChannelItem = {
+  id: string;
+  snippet: { title: string; publishedAt: string };
+  statistics: { videoCount: string; subscriberCount: string; viewCount: string };
+};
+
+// ── Demo data ───────────────────────────────────────────────────────────────
+const sampleData: AnalyzedData = {
   totalSubs: 287,
   yearsOnYoutube: 17,
   deadChannelPercent: 78,
@@ -82,6 +114,7 @@ const sampleData = {
   forgottenInterests: ["목공", "한국요리", "비건", "인디게임 개발", "사진", "독서", "필름카메라", "캘리그라피", "재즈"],
 };
 
+// ── Tiers & scoring ────────────────────────────────────────────────────────
 const tiers = [
   {
     range: [0, 30], code: "minimalist", accent: "#8FA68E", accentSoft: "#B5C5B4",
@@ -137,6 +170,223 @@ function getVerdict(score: number) {
   };
 }
 
+// ── YouTube API ─────────────────────────────────────────────────────────────
+function classifyChannel(title: string): string {
+  const t = title.toLowerCase();
+  if (/게임|gaming|lol|롤|리그|오버워치|valorant|마인크래프트|스팀|플레이/.test(t)) return "게임";
+  if (/요리|쿠킹|cooking|레시피|chef|먹방|음식|자취|살림/.test(t)) return "요리/살림";
+  if (/k-?pop|kpop|아이돌|idol|bts|blackpink|뉴진스|에스파|걸그룹|보이그룹/.test(t)) return "K-pop";
+  if (/음악|music|뮤직|노래|song|뮤지션|band|밴드|힙합|재즈|클래식/.test(t)) return "음악";
+  if (/ai|인공지능|chatgpt|gpt|llm|머신러닝|딥러닝/.test(t)) return "AI/테크";
+  if (/코딩|coding|개발|developer|dev|programmer|프로그래밍|소프트웨어|it강의/.test(t)) return "코딩/IT";
+  if (/테크|tech|technology|gadget|언박싱|리뷰.*기기|전자/.test(t)) return "AI/테크";
+  if (/운동|fitness|gym|헬스|workout|홈트|필라테스|크로스핏|pt|트레이닝/.test(t)) return "홈트/운동";
+  if (/영화|movie|cinema|film|드라마|review|리뷰|평론/.test(t)) return "영화/리뷰";
+  if (/예능|entertainment|방송|유머|개그|vlog|브이로그|일상|먹방/.test(t)) return "엔터/예능";
+  if (/자기계발|성장|성공|mindset|motivation|독서|책|공부|습관/.test(t)) return "자기계발";
+  return "기타";
+}
+
+function generateYearComment(cats: string[], year: number): string {
+  if (year === 2020 || year === 2021) return "COVID 락다운의 흔적";
+  const lines: Record<string, string> = {
+    "음악": "노래에 빠져있던 시절",
+    "K-pop": "아이돌에 빠져있던 시절",
+    "게임": "게임이 한창이었군",
+    "코딩/IT": "코딩 배우던 시절",
+    "AI/테크": "AI에 눈뜬 시절",
+    "요리/살림": "자취 시작했나?",
+    "자기계발": "뭔가 열심히 하려 했던 시절",
+    "홈트/운동": "운동 결심했던 시절",
+    "엔터/예능": "예능 삼매경",
+    "영화/리뷰": "영화에 빠진 시절",
+    "기타": "이것저것 구경하던 시절",
+  };
+  return lines[cats[0]] || "이것저것 구경하던 시절";
+}
+
+function estimateWatchTime(totalSubs: number): { years: number; months: number } {
+  // avg channel: ~500 videos × 12 min = 6000 min = 100 hours
+  const totalHours = totalSubs * 100;
+  const years = Math.floor(totalHours / 8760);
+  const months = Math.floor((totalHours % 8760) / 730);
+  return { years: Math.max(1, years), months };
+}
+
+async function fetchAllSubscriptions(
+  token: string,
+  onProgress?: (n: number) => void,
+): Promise<SubItem[]> {
+  const items: SubItem[] = [];
+  let pageToken = '';
+  do {
+    const url = new URL('https://www.googleapis.com/youtube/v3/subscriptions');
+    url.searchParams.set('part', 'snippet');
+    url.searchParams.set('mine', 'true');
+    url.searchParams.set('maxResults', '50');
+    if (pageToken) url.searchParams.set('pageToken', pageToken);
+
+    const res = await fetch(url.toString(), {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) throw new Error(`subscriptions.list ${res.status}`);
+    const json = await res.json();
+    items.push(...(json.items || []));
+    pageToken = json.nextPageToken || '';
+    onProgress?.(items.length);
+  } while (pageToken);
+  return items;
+}
+
+async function fetchChannelsInBatches(
+  ids: string[],
+  token: string,
+): Promise<Map<string, ChannelItem>> {
+  const map = new Map<string, ChannelItem>();
+  for (let i = 0; i < ids.length; i += 50) {
+    const batch = ids.slice(i, i + 50);
+    const url = new URL('https://www.googleapis.com/youtube/v3/channels');
+    url.searchParams.set('part', 'snippet,statistics');
+    url.searchParams.set('id', batch.join(','));
+    url.searchParams.set('maxResults', '50');
+    const res = await fetch(url.toString(), {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) throw new Error(`channels.list ${res.status}`);
+    const json = await res.json();
+    for (const ch of (json.items || []) as ChannelItem[]) {
+      map.set(ch.id, ch);
+    }
+  }
+  return map;
+}
+
+function isDeadChannel(ch: ChannelItem | undefined): boolean {
+  if (!ch) return true;
+  const videos = parseInt(ch.statistics.videoCount || '0');
+  const subs = parseInt(ch.statistics.subscriberCount || '0');
+  if (videos === 0) return true;
+  if (subs < 50 && videos < 3) return true;
+  return false;
+}
+
+function buildAnalyzedData(subs: SubItem[], channels: Map<string, ChannelItem>): AnalyzedData {
+  const now = new Date().getFullYear();
+
+  const totalSubs = subs.length;
+
+  // oldest subscription
+  const sorted = [...subs].sort(
+    (a, b) => new Date(a.snippet.publishedAt).getTime() - new Date(b.snippet.publishedAt).getTime(),
+  );
+  const oldest = sorted[0];
+  const oldestYear = new Date(oldest.snippet.publishedAt).getFullYear();
+  const yearsOnYoutube = now - oldestYear;
+
+  // dead channel %
+  let deadCount = 0;
+  for (const sub of subs) {
+    if (isDeadChannel(channels.get(sub.snippet.resourceId.channelId))) deadCount++;
+  }
+  const deadChannelPercent = Math.round((deadCount / totalSubs) * 100);
+
+  // score: dead % weighted 70%, size normalized to 300 subs weighted 30%
+  const sizeScore = Math.min((totalSubs / 300) * 100, 100);
+  const lazinessScore = Math.max(0, Math.min(100, Math.round(deadChannelPercent * 0.7 + sizeScore * 0.3)));
+
+  // oldest channel info
+  const oldestCh = channels.get(oldest.snippet.resourceId.channelId);
+  const oldestTitle = oldestCh?.snippet.title || oldest.snippet.title;
+  const oldestDead = isDeadChannel(oldestCh);
+  // estimate diedYear: if dead, roughly 2 years after subscription; clamp to plausible range
+  const diedYear = oldestDead
+    ? Math.min(oldestYear + 3, now - 1)
+    : now;
+
+  // category distribution
+  const catCount: Record<string, number> = {};
+  for (const sub of subs) {
+    const ch = channels.get(sub.snippet.resourceId.channelId);
+    const title = ch?.snippet.title || sub.snippet.title;
+    const cat = classifyChannel(title);
+    catCount[cat] = (catCount[cat] || 0) + 1;
+  }
+  const catEntries = Object.entries(catCount)
+    .filter(([name]) => name !== '기타')
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 9);
+  // add 기타 if significant
+  if (catCount['기타'] > 0) catEntries.push(['기타', catCount['기타']]);
+  const categoryDistribution = catEntries.map(([name, count]) => ({
+    name,
+    count,
+    pct: parseFloat(((count / totalSubs) * 100).toFixed(1)),
+  }));
+
+  // yearly interests: group by subscription year, pick 7 most active years
+  const byYear: Record<number, SubItem[]> = {};
+  for (const sub of subs) {
+    const year = new Date(sub.snippet.publishedAt).getFullYear();
+    if (!byYear[year]) byYear[year] = [];
+    byYear[year].push(sub);
+  }
+
+  const selectedYears = Object.entries(byYear)
+    .map(([year, items]) => ({ year: parseInt(year), count: items.length }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 7)
+    .sort((a, b) => a.year - b.year)
+    .map(y => y.year);
+
+  const yearlyInterests = selectedYears.map(year => {
+    const items = byYear[year];
+    const yearCats: Record<string, number> = {};
+    const channelList = items.slice(0, 5).map(sub => {
+      const ch = channels.get(sub.snippet.resourceId.channelId);
+      const title = ch?.snippet.title || sub.snippet.title;
+      const cat = classifyChannel(title);
+      yearCats[cat] = (yearCats[cat] || 0) + 1;
+      return { name: title, cat, status: isDeadChannel(ch) ? 'dead' : 'alive' };
+    });
+    const topCats = Object.entries(yearCats)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 2)
+      .map(([c]) => c);
+    const age = year === oldestYear ? '처음 가입한 해' : `${year - oldestYear}년차`;
+    return { year, age, categories: topCats, comment: generateYearComment(topCats, year), channels: channelList };
+  });
+
+  // forgotten interests: dead channels from the first half of history
+  const midYear = oldestYear + Math.floor(yearsOnYoutube / 2);
+  const earlyDeadTitles = subs
+    .filter(sub => {
+      const yr = new Date(sub.snippet.publishedAt).getFullYear();
+      return yr <= midYear && isDeadChannel(channels.get(sub.snippet.resourceId.channelId));
+    })
+    .map(sub => {
+      const ch = channels.get(sub.snippet.resourceId.channelId);
+      return ch?.snippet.title || sub.snippet.title;
+    })
+    .slice(0, 12);
+
+  const forgottenInterests = earlyDeadTitles.length >= 5
+    ? earlyDeadTitles
+    : ["목공", "한국요리", "비건", "인디게임 개발", "사진", "독서", "필름카메라", "캘리그라피", "재즈"];
+
+  return {
+    totalSubs,
+    yearsOnYoutube,
+    deadChannelPercent,
+    lazinessScore,
+    oldestSubscription: { channel: oldestTitle, subscribedYear: oldestYear, diedYear },
+    totalWatchTime: estimateWatchTime(totalSubs),
+    categoryDistribution,
+    yearlyInterests,
+    forgottenInterests,
+  };
+}
+
+// ── Hooks ───────────────────────────────────────────────────────────────────
 function useReveal() {
   useEffect(() => {
     const els = document.querySelectorAll(".reveal");
@@ -185,6 +435,7 @@ function useCountUp(target: number, duration = 2400, start = 0): [number, React.
   return [v, ringRef];
 }
 
+// ── UI Components ────────────────────────────────────────────────────────────
 function Chrome() {
   return (
     <header className="chrome">
@@ -227,12 +478,12 @@ function ScoreRing({ score, accent }: { score: number; accent: string }) {
   );
 }
 
-function Hero({ data, accent }: { data: typeof sampleData; accent: string }) {
+function Hero({ data, accent }: { data: AnalyzedData; accent: string }) {
   return (
     <section className="hero">
       <div className="hero-tag reveal">YouTube Subscription Analyzer · v1.0</div>
       <h1 className="hero-title reveal d1">유튜브 <span className="accent">구독 목록</span><br />분석기</h1>
-      <p className="hero-sub reveal d2">17년의 구독 여정을 돌아보다</p>
+      <p className="hero-sub reveal d2">{data.yearsOnYoutube}년의 구독 여정을 돌아보다</p>
       <div className="archive-card reveal d3">
         <div className="archive-head">
           <span>SPECIMEN №{data.totalSubs}</span>
@@ -250,7 +501,7 @@ function Hero({ data, accent }: { data: typeof sampleData; accent: string }) {
   );
 }
 
-function CategoryDonut({ data, accent }: { data: typeof sampleData.categoryDistribution; accent: string }) {
+function CategoryDonut({ data, totalSubs, accent }: { data: AnalyzedData['categoryDistribution']; totalSubs: number; accent: string }) {
   const [active, setActive] = useState<number | null>(null);
   const ref = useRef<HTMLDivElement>(null);
   const [animProgress, setAnimProgress] = useState(0);
@@ -320,7 +571,7 @@ function CategoryDonut({ data, accent }: { data: typeof sampleData.categoryDistr
             <>
               <div className="donut-c-pct" style={{ fontSize: 32 }}>{data.length}</div>
               <div className="donut-c-name" style={{ color: 'var(--paper-mute)', fontStyle: 'italic', fontSize: 12 }}>분야</div>
-              <div className="donut-c-sub">총 {sampleData.totalSubs}개</div>
+              <div className="donut-c-sub">총 {totalSubs}개</div>
             </>
           )}
         </div>
@@ -340,22 +591,22 @@ function CategoryDonut({ data, accent }: { data: typeof sampleData.categoryDistr
   );
 }
 
-function Distribution({ data, accent }: { data: typeof sampleData; accent: string }) {
+function Distribution({ data, accent }: { data: AnalyzedData; accent: string }) {
   return (
     <section>
       <div className="eyebrow reveal"><span className="num">i.</span><span>관심사 분포</span><span className="line"></span></div>
-      <h2 className="title reveal d1">17년 동안 내가 본 것들의<br /><em>지도</em></h2>
+      <h2 className="title reveal d1">{data.yearsOnYoutube}년 동안 내가 본 것들의<br /><em>지도</em></h2>
       <p className="lede reveal d2">{data.totalSubs}개 구독 채널을 카테고리로 묶었어요. 어디에 가장 많이 머물렀을까요.</p>
-      <CategoryDonut data={data.categoryDistribution} accent={accent} />
+      <CategoryDonut data={data.categoryDistribution} totalSubs={data.totalSubs} accent={accent} />
     </section>
   );
 }
 
-function Timeline({ data }: { data: typeof sampleData }) {
+function Timeline({ data }: { data: AnalyzedData }) {
   return (
     <section>
       <div className="eyebrow reveal"><span className="num">ii.</span><span>연도별 구독 기록</span><span className="line"></span></div>
-      <h2 className="title reveal d1">17년의 <em>나</em>들이<br />지나간다</h2>
+      <h2 className="title reveal d1">{data.yearsOnYoutube}년의 <em>나</em>들이<br />지나간다</h2>
       <p className="lede reveal d2">매해 나는 다른 사람이었어요. 그때 구독한 채널이 그 시절을 기억하고 있죠.</p>
       <div className="timeline" style={{ marginTop: 32 }}>
         {data.yearlyInterests.map((y, i) => (
@@ -387,7 +638,7 @@ function Timeline({ data }: { data: typeof sampleData }) {
   );
 }
 
-function Analysis({ data }: { data: typeof sampleData }) {
+function Analysis({ data }: { data: AnalyzedData }) {
   return (
     <section>
       <div className="eyebrow reveal"><span className="num">iii.</span><span>구독목록 분석</span><span className="line"></span></div>
@@ -397,7 +648,7 @@ function Analysis({ data }: { data: typeof sampleData }) {
         <div className="stat reveal">
           <div className="stat-num">{data.deadChannelPercent}<span className="u">%</span></div>
           <h3 className="stat-h">구독 채널의 {data.deadChannelPercent}%가 <em style={{ color: 'var(--coral)', fontStyle: 'italic' }}>무덤 상태</em></h3>
-          <p className="stat-p">최근 1년간 새 영상을 올리지 않은 채널의 비율. {Math.round(data.totalSubs * data.deadChannelPercent / 100)}개의 유령이 당신의 구독함에 살고 있어요.</p>
+          <p className="stat-p">업로드가 없거나 구독자가 거의 없는 채널의 비율. {Math.round(data.totalSubs * data.deadChannelPercent / 100)}개의 유령이 당신의 구독함에 살고 있어요.</p>
         </div>
         <div className="stat reveal d1">
           <div className="stat-num">{data.totalWatchTime.years}<span className="u">년</span></div>
@@ -414,7 +665,7 @@ function Analysis({ data }: { data: typeof sampleData }) {
   );
 }
 
-function OldestGrave({ data }: { data: typeof sampleData }) {
+function OldestGrave({ data }: { data: AnalyzedData }) {
   const o = data.oldestSubscription;
   const lifespan = o.diedYear - o.subscribedYear;
   return (
@@ -435,7 +686,7 @@ function OldestGrave({ data }: { data: typeof sampleData }) {
   );
 }
 
-function Forgotten({ data }: { data: typeof sampleData }) {
+function Forgotten({ data }: { data: AnalyzedData }) {
   const [live, setLive] = useState(new Set<string>());
   const toggle = (t: string) => {
     setLive(prev => {
@@ -446,9 +697,9 @@ function Forgotten({ data }: { data: typeof sampleData }) {
   };
   return (
     <section>
-      <div className="eyebrow reveal"><span className="num">v.</span><span>잊혀진 흥미들</span><span className="line"></span></div>
-      <h2 className="title reveal d1"><em>되살려볼래?</em></h2>
-      <p className="lede reveal d2">한때 당신의 알고리즘을 가득 채웠지만,<br />이제는 흐릿한 단어들. 톡 눌러보세요.</p>
+      <div className="eyebrow reveal"><span className="num">v.</span><span>잊혀진 채널들</span><span className="line"></span></div>
+      <h2 className="title reveal d1"><em>기억나?</em></h2>
+      <p className="lede reveal d2">한때 당신의 알고리즘을 가득 채웠지만,<br />지금은 영상도 없이 구독함에 남아있는 채널들.</p>
       <div className="forgotten-cloud reveal d3">
         {data.forgottenInterests.map(t => (
           <button key={t} className={`ftag ${live.has(t) ? 'live' : ''}`} onClick={() => toggle(t)} type="button">
@@ -456,19 +707,19 @@ function Forgotten({ data }: { data: typeof sampleData }) {
           </button>
         ))}
       </div>
-      <p className="forgotten-q reveal d4">다시 시작하고 싶은 게 있나요?<br />— 가끔은 그게 나를 살리기도 해요.</p>
+      <p className="forgotten-q reveal d4">다시 돌아간 채널이 있나요?<br />— 가끔은 그게 나를 살리기도 해요.</p>
     </section>
   );
 }
 
-function Verdict({ data }: { data: typeof sampleData }) {
+function Verdict({ data }: { data: AnalyzedData }) {
   const v = getVerdict(data.lazinessScore);
   const ringStyle = v.isEdgeCase ? { filter: `drop-shadow(0 0 24px ${v.accent}88)` } : {};
   return (
     <section className="verdict-section" style={{ background: `radial-gradient(120% 80% at 50% 30%, ${v.accent}15, transparent 60%)` }}>
       <div className="eyebrow reveal"><span className="num">vi.</span><span>최종 분석 점수</span><span className="line"></span></div>
       <h2 className="title reveal d1">자, 그래서<br />당신의 <em style={{ color: v.accent }}>점수는</em></h2>
-      <p className="lede reveal d2">17년의 발자취를 종합해서 매긴 한 줄 평가예요.<br />지나치게 진지하게 받아들이지는 마세요.</p>
+      <p className="lede reveal d2">{data.yearsOnYoutube}년의 발자취를 종합해서 매긴 한 줄 평가예요.<br />지나치게 진지하게 받아들이지는 마세요.</p>
       <div className="specimen reveal d3" style={{ marginTop: 28, ...ringStyle }}>
         <div className="specimen-head"><span>FINAL VERDICT</span><span className="id">archived 2026</span></div>
         <ScoreRing score={data.lazinessScore} accent={v.accent} />
@@ -484,7 +735,7 @@ function Verdict({ data }: { data: typeof sampleData }) {
   );
 }
 
-function Share({ data }: { data: typeof sampleData }) {
+function Share({ data }: { data: AnalyzedData }) {
   const v = getVerdict(data.lazinessScore);
   const shareText = v.shareText;
 
@@ -521,7 +772,7 @@ function Share({ data }: { data: typeof sampleData }) {
         <div className="share-preview" style={{ borderColor: `${v.accent}55` }}>
           <div className="pn" style={{ color: v.accent }}>{data.lazinessScore}<span className="pd">/100</span></div>
           <div className="pl">분석 점수 · {v.title} {v.badge}</div>
-          <div className="pt">&quot;{shareText.split('\n')[1] || '내 17년치 유튜브가 박물관이 됐어'}&quot;</div>
+          <div className="pt">&quot;{shareText.split('\n')[1] || '내 유튜브가 박물관이 됐어'}&quot;</div>
         </div>
         <button className="kakao-btn" onClick={onKakao} type="button">
           <svg className="bub" viewBox="0 0 22 20" fill="currentColor"><path d="M11 0C4.92 0 0 3.86 0 8.6c0 3.05 2.04 5.72 5.1 7.21l-1.3 4.74c-.11.4.34.72.7.5l5.62-3.7c.29.03.58.05.88.05 6.08 0 11-3.86 11-8.6S17.08 0 11 0z" /></svg>
@@ -547,13 +798,13 @@ function Share({ data }: { data: typeof sampleData }) {
   );
 }
 
-function CTA() {
+function CTA({ data }: { data: AnalyzedData }) {
   return (
     <>
       <section className="cta-section">
         <div className="cta-eyebrow reveal">— epilogue —</div>
         <h2 className="cta-h reveal d1">이제 진짜<br /><em>정리해볼까요?</em></h2>
-        <p className="cta-p reveal d2">17년치 무덤을 손가락 하나로.<br />무료로 만들었어요. 광고도 없습니다.</p>
+        <p className="cta-p reveal d2">{data.yearsOnYoutube}년치 무덤을 손가락 하나로.<br />무료로 만들었어요. 광고도 없습니다.</p>
         <a className="play-btn reveal d3"
           href="https://play.google.com/store/apps/details?id=com.sangwwoo.youtubesubcleaner"
           target="_blank" rel="noopener noreferrer">
@@ -580,7 +831,7 @@ function CTA() {
       <div className="colophon">
         <span className="em">— colophon —</span>
         유튜브 구독 목록 분석기 · v1.0<br />
-        287개 채널, 17년의 발자국, 한 번의 정리.<br />
+        {data.totalSubs}개 채널, {data.yearsOnYoutube}년의 발자국, 한 번의 정리.<br />
         만든 사람: <span style={{ color: 'var(--coral-soft)' }}>sangwwoo</span> · 2026
       </div>
     </>
@@ -593,7 +844,7 @@ function Landing({ onStart }: { onStart: () => void }) {
       <div className="landing-spacer"></div>
       <div className="landing-tag">YouTube Subscription Analyzer · v1.0</div>
       <h1 className="landing-title">17년의 구독 여정을<br /><em>한 권의 책</em>으로</h1>
-      <p className="landing-sub">당신의 유튜브 구독 채널을 박물관처럼 큐레이션해드려요.<br />잊고 있던 흥미를 다시 만나보세요.</p>
+      <p className="landing-sub">당신의 유튜브 구독 채널을 박물관처럼 큐레이션해드려요.<br />잊고 있던 채널을 다시 만나보세요.</p>
       <div className="landing-promise">
         <div className="promise-h">— 시작 전 약속 —</div>
         <ul className="promise-list">
@@ -618,24 +869,23 @@ function Landing({ onStart }: { onStart: () => void }) {
   );
 }
 
-function Loading() {
-  const steps = [
-    "구독 목록 불러오는 중...",
-    "287개 채널 활동 분석 중...",
-    "카테고리 분류 중...",
-    "연도별 발자취 정리 중...",
-    "분석 점수 계산 중..."
-  ];
-  const [step, setStep] = useState(0);
-  useEffect(() => {
-    const id = setInterval(() => setStep(s => (s + 1) % steps.length), 700);
-    return () => clearInterval(id);
-  }, [steps.length]);
+function Loading({ msg }: { msg: string }) {
   return (
     <div className="loading">
       <div className="loading-orb"></div>
-      <h2 className="loading-h">당신의 <em>17년</em>을<br />들춰보고 있어요</h2>
-      <div className="loading-step">{steps[step]}</div>
+      <h2 className="loading-h">당신의 구독함을<br /><em>들춰보고 있어요</em></h2>
+      <div className="loading-step">{msg}</div>
+    </div>
+  );
+}
+
+function ErrorScreen({ onRetry }: { onRetry: () => void }) {
+  return (
+    <div className="loading">
+      <div className="loading-orb" style={{ background: 'var(--coral)' }}></div>
+      <h2 className="loading-h">분석에 <em>실패했어요</em></h2>
+      <div className="loading-step">Google 권한을 거부했거나 네트워크 오류가 발생했어요.</div>
+      <button className="cta-rerun" style={{ marginTop: 32 }} onClick={onRetry} type="button">← 처음으로</button>
     </div>
   );
 }
@@ -698,17 +948,63 @@ function CardDeck({ cards }: { cards: React.ReactNode[] }) {
   );
 }
 
+// ── App ──────────────────────────────────────────────────────────────────────
 export default function App() {
-  const [phase, setPhase] = useState<'landing' | 'loading' | 'result'>('landing');
-  const data = sampleData;
+  const [phase, setPhase] = useState<'landing' | 'loading' | 'result' | 'error'>('landing');
+  const [data, setData] = useState<AnalyzedData>(sampleData);
+  const [loadingMsg, setLoadingMsg] = useState("구독 목록 불러오는 중...");
 
   const onStart = () => {
-    setPhase('loading');
-    setTimeout(() => setPhase('result'), 3500);
+    const clientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID;
+    const gis = (window as any).google?.accounts?.oauth2;
+
+    if (!clientId || !gis) {
+      // GIS not available — show demo
+      setPhase('loading');
+      setLoadingMsg("데모 데이터 불러오는 중...");
+      setTimeout(() => { setData(sampleData); setPhase('result'); }, 2500);
+      return;
+    }
+
+    const tokenClient = gis.initTokenClient({
+      client_id: clientId,
+      scope: 'https://www.googleapis.com/auth/youtube.readonly',
+      callback: async (resp: { access_token?: string; error?: string }) => {
+        if (!resp.access_token) {
+          if (resp.error !== 'access_denied') setPhase('error');
+          return;
+        }
+        setPhase('loading');
+        try {
+          setLoadingMsg("구독 목록 불러오는 중...");
+          const subs = await fetchAllSubscriptions(resp.access_token, (n) => {
+            setLoadingMsg(`구독 목록 불러오는 중... (${n}개)`);
+          });
+
+          setLoadingMsg(`${subs.length}개 채널 활동 분석 중...`);
+          const channelIds = subs.map(s => s.snippet.resourceId.channelId);
+          const channels = await fetchChannelsInBatches(channelIds, resp.access_token);
+
+          setLoadingMsg("카테고리 분류 중...");
+          await new Promise(r => setTimeout(r, 300));
+
+          setLoadingMsg("분석 점수 계산 중...");
+          const analyzed = buildAnalyzedData(subs, channels);
+          await new Promise(r => setTimeout(r, 600));
+
+          setData(analyzed);
+          setPhase('result');
+        } catch {
+          setPhase('error');
+        }
+      },
+    });
+    tokenClient.requestAccessToken();
   };
 
   if (phase === 'landing') return <div className="stage"><Landing onStart={onStart} /></div>;
-  if (phase === 'loading') return <div className="stage"><Loading /></div>;
+  if (phase === 'loading') return <div className="stage"><Loading msg={loadingMsg} /></div>;
+  if (phase === 'error') return <div className="stage"><ErrorScreen onRetry={() => setPhase('landing')} /></div>;
 
   const cards: React.ReactNode[] = [
     <Hero data={data} accent={ACCENT} />,
@@ -719,7 +1015,7 @@ export default function App() {
     <Forgotten data={data} />,
     <Verdict data={data} />,
     <Share data={data} />,
-    <CTA />,
+    <CTA data={data} />,
   ];
 
   return (
