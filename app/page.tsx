@@ -229,7 +229,11 @@ async function fetchAllSubscriptions(
     const res = await fetch(url.toString(), {
       headers: { Authorization: `Bearer ${token}` },
     });
-    if (!res.ok) throw new Error(`subscriptions.list ${res.status}`);
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      const reason = body?.error?.errors?.[0]?.reason || body?.error?.message || '';
+      throw new Error(`subscriptions.list ${res.status}${reason ? ': ' + reason : ''}`);
+    }
     const json = await res.json();
     items.push(...(json.items || []));
     pageToken = json.nextPageToken || '';
@@ -252,7 +256,11 @@ async function fetchChannelsInBatches(
     const res = await fetch(url.toString(), {
       headers: { Authorization: `Bearer ${token}` },
     });
-    if (!res.ok) throw new Error(`channels.list ${res.status}`);
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      const reason = body?.error?.errors?.[0]?.reason || body?.error?.message || '';
+      throw new Error(`channels.list ${res.status}${reason ? ': ' + reason : ''}`);
+    }
     const json = await res.json();
     for (const ch of (json.items || []) as ChannelItem[]) {
       map.set(ch.id, ch);
