@@ -29,11 +29,34 @@ body::after{
              radial-gradient(120% 100% at 50% 100%, rgba(0,0,0,.35), transparent 50%);
 }
 
-.stage{position:relative;z-index:2;max-width:430px;margin:0 auto;padding:0;}
+.stage{position:relative;z-index:2;max-width:430px;margin:0 auto;padding:0;
+  height:100dvh;overflow:hidden;display:flex;flex-direction:column;}
 @media (min-width:720px){
   .stage{max-width:430px;box-shadow:0 0 120px rgba(0,0,0,.5),0 0 0 1px rgba(242,235,223,.08)}
   body{background:#0F0D0B}
 }
+
+/* ── Card Deck ─────────────────────────────── */
+.card-deck{flex:1;overflow:hidden;position:relative;min-height:0;}
+.card-track{display:flex;height:100%;transition:transform .38s cubic-bezier(.4,0,.2,1);will-change:transform;}
+.card{min-width:100%;width:100%;height:100%;overflow-y:auto;overflow-x:hidden;
+  -webkit-overflow-scrolling:touch;scrollbar-width:none;}
+.card::-webkit-scrollbar{display:none;}
+.card > *:last-child{padding-bottom:56px;}
+
+.card-dots{position:absolute;bottom:16px;left:0;right:0;display:flex;justify-content:center;
+  gap:6px;z-index:10;pointer-events:none;}
+.card-dot{width:5px;height:5px;border-radius:50%;background:var(--paper-faint);border:none;
+  padding:0;cursor:pointer;pointer-events:all;transition:all .3s;flex-shrink:0;}
+.card-dot.active{background:var(--coral);width:18px;border-radius:2.5px;}
+
+.card-arrow{position:absolute;top:50%;transform:translateY(-50%);background:rgba(26,23,20,.75);
+  border:1px solid var(--rule);color:var(--paper-dim);width:32px;height:32px;border-radius:50%;
+  font-size:17px;cursor:pointer;display:flex;align-items:center;justify-content:center;
+  z-index:10;line-height:1;backdrop-filter:blur(6px);transition:opacity .2s;}
+.card-arrow:hover{color:var(--paper);}
+.card-arrow-l{left:8px;}
+.card-arrow-r{right:8px;}
 
 .chrome{position:sticky;top:0;z-index:20;display:flex;align-items:center;justify-content:space-between;
   padding:14px 18px 12px;

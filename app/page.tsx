@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 
 const ACCENT = "#FF6B47";
 
@@ -640,9 +640,66 @@ function Loading() {
   );
 }
 
+function CardDeck({ cards }: { cards: React.ReactNode[] }) {
+  const [cur, setCur] = useState(0);
+  const total = cards.length;
+  const deckRef = useRef<HTMLDivElement>(null);
+  const touchStartX = useRef(0);
+  const touchStartY = useRef(0);
+
+  useEffect(() => {
+    const deck = deckRef.current;
+    if (!deck) return;
+    const cardEls = deck.querySelectorAll('.card');
+    const card = cardEls[cur] as HTMLElement | undefined;
+    if (!card) return;
+    const id = setTimeout(() => {
+      card.querySelectorAll<HTMLElement>('.reveal').forEach(el => el.classList.add('in'));
+    }, 360);
+    return () => clearTimeout(id);
+  }, [cur]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'ArrowRight') go(cur + 1);
+      if (e.key === 'ArrowLeft') go(cur - 1);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  });
+
+  const go = (n: number) => setCur(Math.max(0, Math.min(total - 1, n)));
+
+  const onTouchStart = (e: React.TouchEvent) => {
+    touchStartX.current = e.touches[0].clientX;
+    touchStartY.current = e.touches[0].clientY;
+  };
+  const onTouchEnd = (e: React.TouchEvent) => {
+    const dx = touchStartX.current - e.changedTouches[0].clientX;
+    const dy = Math.abs(touchStartY.current - e.changedTouches[0].clientY);
+    if (Math.abs(dx) > 48 && Math.abs(dx) > dy) go(cur + (dx > 0 ? 1 : -1));
+  };
+
+  return (
+    <div className="card-deck" ref={deckRef} onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
+      <div className="card-track" style={{ transform: `translateX(-${cur * 100}%)` }}>
+        {cards.map((child, i) => (
+          <div key={i} className="card">{child}</div>
+        ))}
+      </div>
+      <div className="card-dots">
+        {cards.map((_, i) => (
+          <button key={i} className={`card-dot${i === cur ? ' active' : ''}`} onClick={() => go(i)} type="button" aria-label={`${i + 1}번 카드`} />
+        ))}
+      </div>
+      {cur > 0 && <button className="card-arrow card-arrow-l" onClick={() => go(cur - 1)} type="button">‹</button>}
+      {cur < total - 1 && <button className="card-arrow card-arrow-r" onClick={() => go(cur + 1)} type="button">›</button>}
+    </div>
+  );
+}
+
 export default function App() {
   const [phase, setPhase] = useState<'landing' | 'loading' | 'result'>('landing');
-  useReveal();
   const data = sampleData;
 
   const onStart = () => {
@@ -653,20 +710,22 @@ export default function App() {
   if (phase === 'landing') return <div className="stage"><Landing onStart={onStart} /></div>;
   if (phase === 'loading') return <div className="stage"><Loading /></div>;
 
+  const cards: React.ReactNode[] = [
+    <Hero data={data} accent={ACCENT} />,
+    <Distribution data={data} accent={ACCENT} />,
+    <Timeline data={data} />,
+    <Analysis data={data} />,
+    <OldestGrave data={data} />,
+    <Forgotten data={data} />,
+    <Verdict data={data} />,
+    <Share data={data} />,
+    <CTA />,
+  ];
+
   return (
     <div className="stage">
       <Chrome />
-      <Hero data={data} accent={ACCENT} />
-      <div className="rule dot" />
-      <Distribution data={data} accent={ACCENT} />
-      <Timeline data={data} />
-      <div className="rule dot" />
-      <Analysis data={data} />
-      <OldestGrave data={data} />
-      <Forgotten data={data} />
-      <Verdict data={data} />
-      <Share data={data} />
-      <CTA />
+      <CardDeck cards={cards} />
     </div>
   );
 }
