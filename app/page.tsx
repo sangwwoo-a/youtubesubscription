@@ -879,12 +879,14 @@ function Loading({ msg }: { msg: string }) {
   );
 }
 
-function ErrorScreen({ onRetry }: { onRetry: () => void }) {
+function ErrorScreen({ onRetry, errorMsg }: { onRetry: () => void; errorMsg?: string }) {
   return (
     <div className="loading">
       <div className="loading-orb" style={{ background: 'var(--coral)' }}></div>
       <h2 className="loading-h">분석에 <em>실패했어요</em></h2>
-      <div className="loading-step">Google 권한을 거부했거나 네트워크 오류가 발생했어요.</div>
+      <div className="loading-step">
+        {errorMsg || 'Google 권한 오류 또는 네트워크 오류가 발생했어요.'}
+      </div>
       <button className="cta-rerun" style={{ marginTop: 32 }} onClick={onRetry} type="button">← 처음으로</button>
     </div>
   );
@@ -953,6 +955,7 @@ export default function App() {
   const [phase, setPhase] = useState<'landing' | 'loading' | 'result' | 'error'>('landing');
   const [data, setData] = useState<AnalyzedData>(sampleData);
   const [loadingMsg, setLoadingMsg] = useState("구독 목록 불러오는 중...");
+  const [errorMsg, setErrorMsg] = useState<string | undefined>();
 
   const onStart = () => {
     const clientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID;
@@ -971,7 +974,11 @@ export default function App() {
       scope: 'https://www.googleapis.com/auth/youtube.readonly',
       callback: async (resp: { access_token?: string; error?: string }) => {
         if (!resp.access_token) {
-          if (resp.error !== 'access_denied') setPhase('error');
+          console.error('[GIS error]', resp.error, resp);
+          if (resp.error !== 'access_denied' && resp.error !== 'popup_closed_by_user') {
+            setErrorMsg(`OAuth 오류: ${resp.error || 'unknown'}`);
+            setPhase('error');
+          }
           return;
         }
         setPhase('loading');
@@ -994,7 +1001,8 @@ export default function App() {
 
           setData(analyzed);
           setPhase('result');
-        } catch {
+        } catch (e) {
+          setErrorMsg(`API 오류: ${e instanceof Error ? e.message : String(e)}`);
           setPhase('error');
         }
       },
@@ -1004,7 +1012,7 @@ export default function App() {
 
   if (phase === 'landing') return <div className="stage"><Landing onStart={onStart} /></div>;
   if (phase === 'loading') return <div className="stage"><Loading msg={loadingMsg} /></div>;
-  if (phase === 'error') return <div className="stage"><ErrorScreen onRetry={() => setPhase('landing')} /></div>;
+  if (phase === 'error') return <div className="stage"><ErrorScreen onRetry={() => setPhase('landing')} errorMsg={errorMsg} /></div>;
 
   const cards: React.ReactNode[] = [
     <Hero data={data} accent={ACCENT} />,
